@@ -11,6 +11,9 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+static const int initial_window_width = 800;//1280;
+static const int initial_window_height = 600;//720;
+
 // EGA Farbpalette (RGB)
 struct Color {
     Uint8 r, g, b;
@@ -145,15 +148,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+
     // Konstanten für Fenster und Dreieck
-    const int window_width = 800;
-    const int window_height = 600;
+    const int logical_width = initial_window_width;  // Logical game resolution
+    const int logical_height = initial_window_height;
+    int window_width = initial_window_width;   // Actual window size
+    int window_height = initial_window_height;
     const int triangle_base = 60;
     const int triangle_height = 40;
     const float triangle_speed = 5.0f;
-    float triangle_x = window_width / 2.0f;
+    float triangle_x = logical_width / 2.0f;
 
-    SDL_Window* window = SDL_CreateWindow("Space Invaders", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_SHOWN);
+    SDL_Window* window = SDL_CreateWindow("Space Invaders", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (!window) {
         std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
         SDL_Quit();
@@ -167,6 +173,10 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
+    // Set logical size for automatic scaling
+    SDL_RenderSetLogicalSize(renderer, logical_width, logical_height);
+    SDL_RenderSetIntegerScale(renderer, SDL_FALSE); // Allow non-integer scaling for smooth resize
+    
     // Load font for win message
     TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36);
     if (!font) {
@@ -294,7 +304,7 @@ int main(int argc, char* argv[]) {
     
     // Boss initialization
     Boss boss;
-    boss.x = window_width / 2.0f;
+    boss.x = logical_width / 2.0f;
     boss.y = 100.0f;
     boss.initial_x = boss.x;
     boss.max_hp = 30;
@@ -326,6 +336,7 @@ int main(int argc, char* argv[]) {
     const float wave_frequency = 0.02f; // Speed of the wave
     const float row_phase_delay = 0.5f; // Phase delay between rows
     SDL_Event event;
+    bool is_fullscreen = false;
     while (running) {
         time_counter += 1.0f;
         // Event-Handling
@@ -333,13 +344,35 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_QUIT) {
                 running = false;
             }
+            // Handle window resize
+            else if (event.type == SDL_WINDOWEVENT) {
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                    window_width = event.window.data1;
+                    window_height = event.window.data2;
+                }
+            }
+            // Handle ALT-ENTER for fullscreen toggle
+            else if (event.type == SDL_KEYDOWN) {
+                if (event.key.keysym.sym == SDLK_RETURN && (event.key.keysym.mod & KMOD_ALT)) {
+                    is_fullscreen = !is_fullscreen;
+                    if (is_fullscreen) {
+                        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                        SDL_GetWindowSize(window, &window_width, &window_height);
+                    } else {
+                        SDL_SetWindowFullscreen(window, 0);
+                        window_width = initial_window_width;
+                        window_height = initial_window_height;
+                        SDL_SetWindowSize(window, window_width, window_height);
+                    }
+                }
+            }
         }
 
         // Boss fight trigger - when all regular aliens are defeated
         if (!boss_fight && !game_over && aliens.empty() && !boss.active) {
             boss_fight = true;
             boss.active = true;
-            boss.x = window_width / 2.0f;
+            boss.x = logical_width / 2.0f;
             boss.y = 100.0f;
             boss.initial_x = boss.x;
             boss.hp = boss.max_hp;
@@ -409,7 +442,7 @@ int main(int argc, char* argv[]) {
         // Game Over detection - check if any alien reached the bottom
         if (!game_over && !win) {
             for (const auto& alien : aliens) {
-                if (alien.y + alien_size >= window_height) {
+                if (alien.y + alien_size >= logical_height) {
                     game_over = true;
                     break;
                 }
@@ -426,12 +459,12 @@ int main(int argc, char* argv[]) {
             SDL_Color textColor = {255, 0, 0, 255}; // Rot für Game Over
             std::string gameOverText = "Game Over";
             SDL_Surface* textSurface = TTF_RenderUTF8_Blended(font, gameOverText.c_str(), textColor);
-            int textY = window_height/2 - 60;
+            int textY = logical_height/2 - 60;
             if (textSurface) {
                 SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
                 int tw = textSurface->w;
                 int th = textSurface->h;
-                SDL_Rect dstRect = {window_width/2 - tw/2, textY, tw, th};
+                SDL_Rect dstRect = {logical_width/2 - tw/2, textY, tw, th};
                 SDL_RenderCopy(renderer, textTexture, NULL, &dstRect);
                 SDL_DestroyTexture(textTexture);
                 SDL_FreeSurface(textSurface);
@@ -444,7 +477,7 @@ int main(int argc, char* argv[]) {
                 SDL_Texture* bottomTexture = SDL_CreateTextureFromSurface(renderer, bottomSurface);
                 int btw = bottomSurface->w;
                 int bth = bottomSurface->h;
-                SDL_Rect bottomRect = {window_width/2 - btw/2, window_height - bth - 40, btw, bth};
+                SDL_Rect bottomRect = {logical_width/2 - btw/2, logical_height - bth - 40, btw, bth};
                 SDL_RenderCopy(renderer, bottomTexture, NULL, &bottomRect);
                 SDL_DestroyTexture(bottomTexture);
                 SDL_FreeSurface(bottomSurface);
@@ -456,7 +489,7 @@ int main(int argc, char* argv[]) {
                 projectiles.clear();
                 boss_projectiles.clear();
                 boss_particles.clear();
-                triangle_x = window_width / 2.0f;
+                triangle_x = logical_width / 2.0f;
                 time_counter = 0.0f;
                 boss.active = false;
                 boss.hp = boss.max_hp;
@@ -480,13 +513,13 @@ int main(int argc, char* argv[]) {
             SDL_Color textColor = {255, 255, 0, 255};
             std::string winText = "You're Winner!";
             SDL_Surface* textSurface = TTF_RenderUTF8_Blended(font, winText.c_str(), textColor);
-            int textY = window_height/2 - 60;
-            int trophyY = window_height/2 + 10;
+            int textY = logical_height/2 - 60;
+            int trophyY = logical_height/2 + 10;
             if (textSurface) {
                 SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
                 int tw = textSurface->w;
                 int th = textSurface->h;
-                SDL_Rect dstRect = {window_width/2 - tw/2, textY, tw, th};
+                SDL_Rect dstRect = {logical_width/2 - tw/2, textY, tw, th};
                 SDL_RenderCopy(renderer, textTexture, NULL, &dstRect);
                 SDL_DestroyTexture(textTexture);
                 SDL_FreeSurface(textSurface);
@@ -494,7 +527,7 @@ int main(int argc, char* argv[]) {
             // Draw trophy PNG below the text
             if (trophyTexture) {
                 int trophyW = 64, trophyH = 64;
-                SDL_Rect trophyRect = {window_width/2 - trophyW/2, trophyY, trophyW, trophyH};
+                SDL_Rect trophyRect = {logical_width/2 - trophyW/2, trophyY, trophyW, trophyH};
                 SDL_RenderCopy(renderer, trophyTexture, NULL, &trophyRect);
             }
             // Draw 'Press ENTER to start a new game' at the bottom
@@ -505,7 +538,7 @@ int main(int argc, char* argv[]) {
                 SDL_Texture* bottomTexture = SDL_CreateTextureFromSurface(renderer, bottomSurface);
                 int btw = bottomSurface->w;
                 int bth = bottomSurface->h;
-                SDL_Rect bottomRect = {window_width/2 - btw/2, window_height - bth - 40, btw, bth};
+                SDL_Rect bottomRect = {logical_width/2 - btw/2, logical_height - bth - 40, btw, bth};
                 SDL_RenderCopy(renderer, bottomTexture, NULL, &bottomRect);
                 SDL_DestroyTexture(bottomTexture);
                 SDL_FreeSurface(bottomSurface);
@@ -517,7 +550,7 @@ int main(int argc, char* argv[]) {
                 projectiles.clear();
                 boss_projectiles.clear();
                 boss_particles.clear();
-                triangle_x = window_width / 2.0f;
+                triangle_x = logical_width / 2.0f;
                 time_counter = 0.0f;
                 boss.active = false;
                 boss.hp = boss.max_hp;
@@ -548,7 +581,7 @@ int main(int argc, char* argv[]) {
         // Gorilla zeichnen
         if (gorillaTexture) {
             int gorillaW = 64, gorillaH = 64;
-            SDL_Rect gorillaRect = {static_cast<int>(triangle_x) - gorillaW/2, window_height - gorillaH - 10, gorillaW, gorillaH};
+            SDL_Rect gorillaRect = {static_cast<int>(triangle_x) - gorillaW/2, logical_height - gorillaH - 10, gorillaW, gorillaH};
             SDL_RenderCopy(renderer, gorillaTexture, NULL, &gorillaRect);
         }
 
@@ -560,14 +593,14 @@ int main(int argc, char* argv[]) {
         }
         // Begrenzung, damit der Gorilla im Fenster bleibt
         triangle_x = std::max(triangle_x, 32.0f);
-        triangle_x = std::min(triangle_x, window_width - 32.0f);
+        triangle_x = std::min(triangle_x, logical_width - 32.0f);
         // Geschoss abfeuern, wenn Leertaste gedrückt und weniger als 3 aktiv
         static bool space_was_pressed = false;
         if (state[SDL_SCANCODE_SPACE]) {
             if (!space_was_pressed && projectiles.size() < max_projectiles) {
                 Projectile p;
                 p.x = triangle_x;
-                p.y = static_cast<float>(window_height - 32); // Unterkante Gorilla
+                p.y = static_cast<float>(logical_height - 32); // Unterkante Gorilla
                 p.speed = projectile_speed;
                 p.vx = 0.0f; // Player projectiles go straight up
                 p.vy = -projectile_speed;
@@ -649,7 +682,7 @@ int main(int argc, char* argv[]) {
                 float t = boss_figure8_time;
                 
                 // Lemniscate of Gerono equations with center at initial position
-                float center_x = window_width / 2.0f;
+                float center_x = logical_width / 2.0f;
                 float center_y = 150.0f; // Keep boss near top of screen
                 
                 // Figure-eight parametric equations
@@ -675,7 +708,7 @@ int main(int argc, char* argv[]) {
             // Draw boss health bar
             int bar_width = 200;
             int bar_height = 20;
-            int bar_x = window_width / 2 - bar_width / 2;
+            int bar_x = logical_width / 2 - bar_width / 2;
             int bar_y = 20;
             // Background (red)
             SDL_SetRenderDrawColor(renderer, 100, 0, 0, 255);
@@ -700,7 +733,7 @@ int main(int argc, char* argv[]) {
                     
                     // Calculate direction to player with randomness
                     float target_x = triangle_x + (rand() % 81 - 40); // +/- 40 pixels randomness
-                    float target_y = window_height - 32; // Player's approximate y position
+                    float target_y = logical_height - 32; // Player's approximate y position
                     float dx = target_x - laser.x;
                     float dy = target_y - laser.y;
                     float distance = sqrt(dx*dx + dy*dy);
@@ -729,11 +762,11 @@ int main(int argc, char* argv[]) {
                 // Collision with screen edges
                 if (particle.x - particle.size/2 <= 0 || particle.x + particle.size/2 >= window_width) {
                     particle.vx = -particle.vx * damping;
-                    particle.x = (particle.x < window_width/2) ? particle.size/2 : window_width - particle.size/2;
+                    particle.x = (particle.x < logical_width/2) ? particle.size/2 : window_width - particle.size/2;
                 }
-                if (particle.y - particle.size/2 <= 0 || particle.y + particle.size/2 >= window_height) {
+                if (particle.y - particle.size/2 <= 0 || particle.y + particle.size/2 >= logical_height) {
                     particle.vy = -particle.vy * damping;
-                    particle.y = (particle.y < window_height/2) ? particle.size/2 : window_height - particle.size/2;
+                    particle.y = (particle.y < logical_height/2) ? particle.size/2 : logical_height - particle.size/2;
                 }
                 
                 // Simple particle-to-particle collision
@@ -833,7 +866,7 @@ int main(int argc, char* argv[]) {
         
         // Kollisionserkennung: Boss laser trifft Spieler
         int gorillaW = 64, gorillaH = 64;
-        SDL_Rect player_rect = {static_cast<int>(triangle_x) - gorillaW/2, window_height - gorillaH - 10, gorillaW, gorillaH};
+        SDL_Rect player_rect = {static_cast<int>(triangle_x) - gorillaW/2, logical_height - gorillaH - 10, gorillaW, gorillaH};
         for (const auto& laser : boss_projectiles) {
             int laser_radius = 12;
             SDL_Rect laser_rect = {static_cast<int>(laser.x) - laser_radius, static_cast<int>(laser.y) - laser_radius, laser_radius * 2, laser_radius * 2};
