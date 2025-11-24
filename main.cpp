@@ -7,6 +7,10 @@
 #include <vector>
 #include <cmath> // Für sin()
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 // EGA Farbpalette (RGB)
 struct Color {
     Uint8 r, g, b;
@@ -18,6 +22,24 @@ struct Alien {
     float initial_x;
     int row;
     Color color;
+};
+
+// Boss-Zustand
+struct Boss {
+    float x, y;
+    float initial_x;
+    int hp;
+    int max_hp;
+    Color color;
+    bool active;
+};
+
+// Boss explosion particle
+struct BossParticle {
+    float x, y;
+    float vx, vy; // velocity
+    Color color;
+    int size; // pixel size
 };
 
 // Zeichnet ein Space-Invaders-Alien an Position (x, y) mit gegebener Größe und Farbe
@@ -53,6 +75,7 @@ void DrawAlien(SDL_Renderer* renderer, int x, int y, int size, Color color) {
 struct Projectile {
     float x, y;
     float speed;
+    float vx, vy; // Velocity components for directional movement
 };
 
 // Hilfsfunktion zum Zeichnen eines Kreises (Midpoint Circle Algorithmus)
@@ -199,15 +222,32 @@ int main(int argc, char* argv[]) {
             SDL_FreeSurface(backgroundSurface);
         }
     }
+    // Load boss background JPG
+    SDL_Texture* bossBackgroundTexture = nullptr;
+    {
+        SDL_Surface* bossBackgroundSurface = IMG_Load("boss_background.jpg");
+        if (!bossBackgroundSurface) {
+            std::cerr << "IMG_Load Error: " << IMG_GetError() << std::endl;
+        } else {
+            bossBackgroundTexture = SDL_CreateTextureFromSurface(renderer, bossBackgroundSurface);
+            SDL_FreeSurface(bossBackgroundSurface);
+        }
+    }
 
     // Geschossverwaltung
     std::vector<Projectile> projectiles;
     const int max_projectiles = 3;
     const float projectile_speed = 6.0f;
+    
+    // Boss projectiles
+    std::vector<Projectile> boss_projectiles;
+    const float boss_projectile_speed = 3.0f;
+    int boss_shoot_cooldown = 100 + rand() % 201; // Random initial cooldown (100-300 frames = 1-3 seconds)
 
     bool running = true;
     bool win = false;
     bool game_over = false;
+    bool boss_fight = false;
     // Alien-Array-Konstanten
     const int ALIEN_ROWS = 3;
     const int ALIEN_COLS = 10;
@@ -251,6 +291,36 @@ int main(int argc, char* argv[]) {
         return new_aliens;
     };
     std::vector<Alien> aliens = init_aliens();
+    
+    // Boss initialization
+    Boss boss;
+    boss.x = window_width / 2.0f;
+    boss.y = 100.0f;
+    boss.initial_x = boss.x;
+    boss.max_hp = 30;
+    boss.hp = boss.max_hp;
+    boss.color = ega_palette[14]; // Yellow
+    boss.active = false;
+    const int boss_size = 192; // 4x the regular alien size
+    float boss_figure8_time = 0.0f;
+    float boss_random_offset_x = 0.0f;
+    float boss_random_offset_y = 0.0f;
+    float boss_target_offset_x = 0.0f;
+    float boss_target_offset_y = 0.0f;
+    int boss_random_update_counter = 0;
+    const int boss_random_update_interval = 30; // Update randomness every 30 frames
+    
+    // Boss explosion particles
+    std::vector<BossParticle> boss_particles;
+    bool boss_dying = false;
+    bool boss_exploding = false;
+    int death_timer = 0;
+    const int death_duration = 180; // 3 seconds at 60fps for blinking
+    int explosion_timer = 0;
+    const int explosion_duration = 180; // 3s at 60 FPS
+    const float gravity = 0.5f;
+    const float damping = 0.8f; // Energy loss on collision
+    
     float time_counter = 0.0f;
     const float wave_amplitude = 30.0f; // How far left/right aliens move
     const float wave_frequency = 0.02f; // Speed of the wave
@@ -265,9 +335,75 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Win detection
-        if (!win && !game_over && aliens.empty()) {
-            win = true;
+        // Boss fight trigger - when all regular aliens are defeated
+        if (!boss_fight && !game_over && aliens.empty() && !boss.active) {
+            boss_fight = true;
+            boss.active = true;
+            boss.x = window_width / 2.0f;
+            boss.y = 100.0f;
+            boss.initial_x = boss.x;
+            boss.hp = boss.max_hp;
+            boss_figure8_time = 0.0f;
+            boss_random_update_counter = 0;
+        }
+
+        // Win detection - defeat the boss triggers death phase
+        if (boss_fight && !game_over && !boss_dying && !boss_exploding && boss.hp <= 0) {
+            // Trigger death/blinking phase
+            boss_dying = true;
+            death_timer = 0;
+        }
+        
+        // Death phase - boss blinks before exploding
+        if (boss_dying) {
+            death_timer++;
+            if (death_timer >= death_duration) {
+                // Trigger explosion after blinking
+                boss_exploding = true;
+                boss_dying = false;
+                boss.active = false;
+                explosion_timer = 0;
+                
+                // Create explosion particles from boss pixels
+                const int N = 8;
+                const uint8_t alien[N] = {
+                    0b00111100,
+                    0b01111110,
+                    0b11111111,
+                    0b11011011,
+                    0b11111111,
+                    0b00100100,
+                    0b01011010,
+                    0b10100101
+                };
+                int pixel_size = boss_size / N;
+                for (int row = 0; row < N; ++row) {
+                    for (int col = 0; col < N; ++col) {
+                        if (alien[row] & (1 << (7 - col))) {
+                            BossParticle p;
+                            p.x = boss.x - boss_size/2 + col * pixel_size + pixel_size/2;
+                            p.y = boss.y + row * pixel_size + pixel_size/2;
+                            // Random velocity for explosion
+                            float angle = ((float)rand() / RAND_MAX) * 2.0f * M_PI;
+                            float speed = 2.0f + ((float)rand() / RAND_MAX) * 8.0f;
+                            p.vx = cos(angle) * speed;
+                            p.vy = sin(angle) * speed - 5.0f; // Bias upward
+                            p.color = ega_palette[15]; // White color for particles
+                            p.size = pixel_size;
+                            boss_particles.push_back(p);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check if explosion is complete
+        if (boss_exploding) {
+            explosion_timer++;
+            if (explosion_timer >= explosion_duration) {
+                win = true;
+                boss_exploding = false;
+            }
         }
 
         // Game Over detection - check if any alien reached the bottom
@@ -278,6 +414,7 @@ int main(int argc, char* argv[]) {
                     break;
                 }
             }
+            // Boss doesn't trigger game over by position since it flies in a pattern
         }
 
         // Tastenzustand abfragen
@@ -317,8 +454,19 @@ int main(int argc, char* argv[]) {
             if (enter_pressed) {
                 aliens = init_aliens();
                 projectiles.clear();
+                boss_projectiles.clear();
+                boss_particles.clear();
                 triangle_x = window_width / 2.0f;
                 time_counter = 0.0f;
+                boss.active = false;
+                boss.hp = boss.max_hp;
+                boss_fight = false;
+                boss_dying = false;
+                boss_exploding = false;
+                death_timer = 0;
+                explosion_timer = 0;
+                boss_figure8_time = 0.0f;
+                boss_random_update_counter = 0;
                 game_over = false;
             }
             SDL_RenderPresent(renderer);
@@ -367,8 +515,19 @@ int main(int argc, char* argv[]) {
             if (enter_pressed) {
                 aliens = init_aliens();
                 projectiles.clear();
+                boss_projectiles.clear();
+                boss_particles.clear();
                 triangle_x = window_width / 2.0f;
                 time_counter = 0.0f;
+                boss.active = false;
+                boss.hp = boss.max_hp;
+                boss_fight = false;
+                boss_dying = false;
+                boss_exploding = false;
+                death_timer = 0;
+                explosion_timer = 0;
+                boss_figure8_time = 0.0f;
+                boss_random_update_counter = 0;
                 win = false;
             }
             SDL_RenderPresent(renderer);
@@ -377,7 +536,9 @@ int main(int argc, char* argv[]) {
         }
 
         // Hintergrund zeichnen
-        if (backgroundTexture) {
+        if (boss_fight && bossBackgroundTexture) {
+            SDL_RenderCopy(renderer, bossBackgroundTexture, NULL, NULL);
+        } else if (backgroundTexture) {
             SDL_RenderCopy(renderer, backgroundTexture, NULL, NULL);
         } else {
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
@@ -408,6 +569,8 @@ int main(int argc, char* argv[]) {
                 p.x = triangle_x;
                 p.y = static_cast<float>(window_height - 32); // Unterkante Gorilla
                 p.speed = projectile_speed;
+                p.vx = 0.0f; // Player projectiles go straight up
+                p.vy = -projectile_speed;
                 projectiles.push_back(p);
             }
             space_was_pressed = true;
@@ -439,6 +602,21 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Kollisionserkennung: Geschoss trifft Boss
+        if (boss.active) {
+            for (auto proj_it = projectiles.begin(); proj_it != projectiles.end(); ) {
+                SDL_Rect boss_rect = { static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, boss_size };
+                int barrelW = 32, barrelH = 48;
+                SDL_Rect proj_rect = { static_cast<int>(proj_it->x) - barrelW/2, static_cast<int>(proj_it->y) - barrelH, barrelW, barrelH };
+                if (SDL_HasIntersection(&boss_rect, &proj_rect)) {
+                    boss.hp--;
+                    proj_it = projectiles.erase(proj_it);
+                } else {
+                    ++proj_it;
+                }
+            }
+        }
+
         // Aliens bewegen und zeichnen (individuelle Farbe)
         for (auto& alien : aliens) {
             alien.y += alien_speed; // Bewegung nach unten
@@ -446,6 +624,163 @@ int main(int argc, char* argv[]) {
             float phase = time_counter * wave_frequency + alien.row * row_phase_delay;
             alien.x = alien.initial_x + wave_amplitude * sin(phase);
             DrawAlien(renderer, static_cast<int>(alien.x), static_cast<int>(alien.y), alien_size, alien.color);
+        }
+
+        // Boss bewegen und zeichnen
+        if (boss.active) {
+            // Only move if not dying
+            if (!boss_dying) {
+                // Update random target offsets periodically
+                boss_random_update_counter--;
+                if (boss_random_update_counter <= 0) {
+                    boss_target_offset_x = (rand() % 61 - 30); // -30 to +30 pixels
+                    boss_target_offset_y = (rand() % 41 - 20); // -20 to +20 pixels
+                    boss_random_update_counter = boss_random_update_interval;
+                }
+                
+                // Smoothly interpolate current offsets toward target offsets
+                float lerp_factor = 0.05f; // Adjust for smoothness (lower = smoother)
+                boss_random_offset_x += (boss_target_offset_x - boss_random_offset_x) * lerp_factor;
+                boss_random_offset_y += (boss_target_offset_y - boss_random_offset_y) * lerp_factor;
+                
+                // Figure-eight (lemniscate) pattern
+                boss_figure8_time += 0.015f; // Speed of figure-eight
+                float scale = 150.0f; // Size of the figure-eight
+                float t = boss_figure8_time;
+                
+                // Lemniscate of Gerono equations with center at initial position
+                float center_x = window_width / 2.0f;
+                float center_y = 150.0f; // Keep boss near top of screen
+                
+                // Figure-eight parametric equations
+                float eight_x = scale * sin(t);
+                float eight_y = scale * sin(t) * cos(t); // Creates the figure-eight shape
+                
+                boss.x = center_x + eight_x + boss_random_offset_x;
+                boss.y = center_y + eight_y + boss_random_offset_y;
+            }
+            
+            // Render boss with blinking effect during death phase
+            if (boss_dying) {
+                // Blink effect: visible every 8 frames, gradually faster
+                int blink_speed = 8 - (death_timer * 6 / death_duration); // Speed up blinking
+                if (blink_speed < 2) blink_speed = 2;
+                if ((death_timer / blink_speed) % 2 == 0) {
+                    DrawAlien(renderer, static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, ega_palette[15]); // White
+                }
+            } else {
+                DrawAlien(renderer, static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, boss.color);
+            }
+            
+            // Draw boss health bar
+            int bar_width = 200;
+            int bar_height = 20;
+            int bar_x = window_width / 2 - bar_width / 2;
+            int bar_y = 20;
+            // Background (red)
+            SDL_SetRenderDrawColor(renderer, 100, 0, 0, 255);
+            SDL_Rect bg_rect = {bar_x, bar_y, bar_width, bar_height};
+            SDL_RenderFillRect(renderer, &bg_rect);
+            // Health (green)
+            int health_width = (bar_width * boss.hp) / boss.max_hp;
+            SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+            SDL_Rect health_rect = {bar_x, bar_y, health_width, bar_height};
+            SDL_RenderFillRect(renderer, &health_rect);
+            // Border (white)
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_RenderDrawRect(renderer, &bg_rect);
+            
+            // Boss shooting logic (only when not dying)
+            if (!boss_dying) {
+                boss_shoot_cooldown--;
+                if (boss_shoot_cooldown <= 0) {
+                    Projectile laser;
+                    laser.x = boss.x;
+                    laser.y = boss.y + boss_size;
+                    
+                    // Calculate direction to player with randomness
+                    float target_x = triangle_x + (rand() % 81 - 40); // +/- 40 pixels randomness
+                    float target_y = window_height - 32; // Player's approximate y position
+                    float dx = target_x - laser.x;
+                    float dy = target_y - laser.y;
+                    float distance = sqrt(dx*dx + dy*dy);
+                    
+                    // Normalize and scale to boss_projectile_speed
+                    laser.vx = (dx / distance) * boss_projectile_speed;
+                    laser.vy = (dy / distance) * boss_projectile_speed;
+                    laser.speed = boss_projectile_speed; // Keep for compatibility
+                    
+                    boss_projectiles.push_back(laser);
+                    boss_shoot_cooldown = 100 + rand() % 201; // Random cooldown (100-300 frames = 1-3 seconds)
+                }
+            }
+        }
+
+        // Boss explosion particles - physics simulation
+        if (boss_exploding) {
+            for (auto& particle : boss_particles) {
+                // Apply gravity
+                particle.vy += gravity;
+                
+                // Update position
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                
+                // Collision with screen edges
+                if (particle.x - particle.size/2 <= 0 || particle.x + particle.size/2 >= window_width) {
+                    particle.vx = -particle.vx * damping;
+                    particle.x = (particle.x < window_width/2) ? particle.size/2 : window_width - particle.size/2;
+                }
+                if (particle.y - particle.size/2 <= 0 || particle.y + particle.size/2 >= window_height) {
+                    particle.vy = -particle.vy * damping;
+                    particle.y = (particle.y < window_height/2) ? particle.size/2 : window_height - particle.size/2;
+                }
+                
+                // Simple particle-to-particle collision
+                for (auto& other : boss_particles) {
+                    if (&particle == &other) continue;
+                    
+                    float dx = other.x - particle.x;
+                    float dy = other.y - particle.y;
+                    float dist = sqrt(dx*dx + dy*dy);
+                    float min_dist = particle.size;
+                    
+                    if (dist < min_dist && dist > 0.1f) {
+                        // Normalize collision vector
+                        dx /= dist;
+                        dy /= dist;
+                        
+                        // Separate particles
+                        float overlap = min_dist - dist;
+                        particle.x -= dx * overlap * 0.5f;
+                        particle.y -= dy * overlap * 0.5f;
+                        other.x += dx * overlap * 0.5f;
+                        other.y += dy * overlap * 0.5f;
+                        
+                        // Exchange velocities along collision normal (simplified elastic collision)
+                        float relative_vx = particle.vx - other.vx;
+                        float relative_vy = particle.vy - other.vy;
+                        float dot = (relative_vx * dx + relative_vy * dy) * damping;
+                        
+                        particle.vx -= dot * dx;
+                        particle.vy -= dot * dy;
+                        other.vx += dot * dx;
+                        other.vy += dot * dy;
+                    }
+                }
+            }
+            
+            // Draw particles
+            for (const auto& particle : boss_particles) {
+                SDL_SetRenderDrawColor(renderer, particle.color.r, particle.color.g, particle.color.b, 255);
+                SDL_Rect rect = {
+                    static_cast<int>(particle.x - particle.size/2),
+                    static_cast<int>(particle.y - particle.size/2),
+                    particle.size,
+                    particle.size
+                };
+                SDL_RenderFillRect(renderer, &rect);
+            }
         }
 
         // Geschosse bewegen und zeichnen
@@ -467,6 +802,46 @@ int main(int argc, char* argv[]) {
                 SDL_RenderCopy(renderer, barrelTexture, NULL, &barrelRect);
             }
         }
+        
+        // Boss projectiles bewegen und zeichnen
+        for (auto& laser : boss_projectiles) {
+            laser.x += laser.vx; // Move using velocity components
+            laser.y += laser.vy;
+        }
+        // Entferne Boss-Geschosse, die den unteren Rand verlassen haben
+        boss_projectiles.erase(
+            std::remove_if(boss_projectiles.begin(), boss_projectiles.end(), [&](const Projectile& p) {
+                return p.y > window_height;
+            }),
+            boss_projectiles.end()
+        );
+        // Zeichne alle verbleibenden Boss-Geschosse als rote Kugeln
+        for (const auto& laser : boss_projectiles) {
+            int laser_radius = 12;
+            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red
+            // Draw filled circle
+            for (int w = 0; w < laser_radius * 2; w++) {
+                for (int h = 0; h < laser_radius * 2; h++) {
+                    int dx = laser_radius - w;
+                    int dy = laser_radius - h;
+                    if ((dx*dx + dy*dy) <= (laser_radius * laser_radius)) {
+                        SDL_RenderDrawPoint(renderer, static_cast<int>(laser.x) + dx, static_cast<int>(laser.y) + dy);
+                    }
+                }
+            }
+        }
+        
+        // Kollisionserkennung: Boss laser trifft Spieler
+        int gorillaW = 64, gorillaH = 64;
+        SDL_Rect player_rect = {static_cast<int>(triangle_x) - gorillaW/2, window_height - gorillaH - 10, gorillaW, gorillaH};
+        for (const auto& laser : boss_projectiles) {
+            int laser_radius = 12;
+            SDL_Rect laser_rect = {static_cast<int>(laser.x) - laser_radius, static_cast<int>(laser.y) - laser_radius, laser_radius * 2, laser_radius * 2};
+            if (SDL_HasIntersection(&player_rect, &laser_rect)) {
+                game_over = true;
+                break;
+            }
+        }
         // ... entfernt: Dreieck-Zeichnung ...
 
         SDL_RenderPresent(renderer);
@@ -477,6 +852,7 @@ int main(int argc, char* argv[]) {
     if (gorillaTexture) SDL_DestroyTexture(gorillaTexture);
     if (barrelTexture) SDL_DestroyTexture(barrelTexture);
     if (backgroundTexture) SDL_DestroyTexture(backgroundTexture);
+    if (bossBackgroundTexture) SDL_DestroyTexture(bossBackgroundTexture);
     TTF_CloseFont(font);
     TTF_Quit();
     IMG_Quit();
