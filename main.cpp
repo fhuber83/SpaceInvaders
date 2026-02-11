@@ -6,6 +6,10 @@
 #include <algorithm> // Für std::max und std::min
 #include <vector>
 #include <cmath> // Für sin()
+#include <SDL2/SDL.h>
+#include <iostream>
+#include <algorithm> // Für std::max und std::min
+#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -16,12 +20,15 @@ static const int initial_window_height = 600;//720;
 
 // EGA Farbpalette (RGB)
 struct Color {
-    Uint8 r, g, b;
+    Uint8 r;
+    Uint8 g;
+    Uint8 b;
 };
 
 // Alien-Zustand
 struct Alien {
-    float x, y;
+    float x;
+    float y;
     float initial_x;
     int row;
     Color color;
@@ -29,7 +36,8 @@ struct Alien {
 
 // Boss-Zustand
 struct Boss {
-    float x, y;
+    float x;
+    float y;
     float initial_x;
     int hp;
     int max_hp;
@@ -39,8 +47,12 @@ struct Boss {
 
 // Boss explosion particle
 struct BossParticle {
-    float x, y;
-    float vx, vy; // velocity
+    // Position
+    float x;
+    float y;
+     // velocity
+    float vx;
+    float vy;
     Color color;
     int size; // pixel size
 };
@@ -70,15 +82,18 @@ void DrawAlien(SDL_Renderer* renderer, int x, int y, int size, Color color) {
         }
     }
 }
-#include <SDL2/SDL.h>
-#include <iostream>
-#include <algorithm> // Für std::max und std::min
-#include <vector>
+
 
 struct Projectile {
-    float x, y;
+    // Position
+    float x;
+    float y;
+
     float speed;
-    float vx, vy; // Velocity components for directional movement
+
+     // Velocity components for directional movement
+    float vx;
+    float vy;
 };
 
 // Hilfsfunktion zum Zeichnen eines Kreises (Midpoint Circle Algorithmus)
@@ -154,8 +169,6 @@ int main(int argc, char* argv[]) {
     const int logical_height = initial_window_height;
     int window_width = initial_window_width;   // Actual window size
     int window_height = initial_window_height;
-    const int triangle_base = 60;
-    const int triangle_height = 40;
     const float triangle_speed = 5.0f;
     float triangle_x = logical_width / 2.0f;
 
@@ -273,7 +286,7 @@ int main(int argc, char* argv[]) {
         // 2D color index array for adjacency checks
         std::vector<std::vector<int>> color_indices(ALIEN_ROWS, std::vector<int>(ALIEN_COLS, -1));
         int background_idx = 0; // EGA palette index for black
-        int palette_size = ega_palette.size();
+        auto palette_size = static_cast<int>(ega_palette.size());
         for (int row = 0; row < ALIEN_ROWS; ++row) {
             for (int col = 0; col < ALIEN_COLS; ++col) {
                 std::vector<int> forbidden;
@@ -451,7 +464,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Tastenzustand abfragen
-        const Uint8* state = SDL_GetKeyboardState(NULL);
+        const Uint8* state = SDL_GetKeyboardState(nullptr);
 
         if (game_over) {
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
@@ -465,7 +478,7 @@ int main(int argc, char* argv[]) {
                 int tw = textSurface->w;
                 int th = textSurface->h;
                 SDL_Rect dstRect = {logical_width/2 - tw/2, textY, tw, th};
-                SDL_RenderCopy(renderer, textTexture, NULL, &dstRect);
+                SDL_RenderCopy(renderer, textTexture, nullptr, &dstRect);
                 SDL_DestroyTexture(textTexture);
                 SDL_FreeSurface(textSurface);
             }
@@ -478,7 +491,7 @@ int main(int argc, char* argv[]) {
                 int btw = bottomSurface->w;
                 int bth = bottomSurface->h;
                 SDL_Rect bottomRect = {logical_width/2 - btw/2, logical_height - bth - 40, btw, bth};
-                SDL_RenderCopy(renderer, bottomTexture, NULL, &bottomRect);
+                SDL_RenderCopy(renderer, bottomTexture, nullptr, &bottomRect);
                 SDL_DestroyTexture(bottomTexture);
                 SDL_FreeSurface(bottomSurface);
             }
@@ -520,15 +533,16 @@ int main(int argc, char* argv[]) {
                 int tw = textSurface->w;
                 int th = textSurface->h;
                 SDL_Rect dstRect = {logical_width/2 - tw/2, textY, tw, th};
-                SDL_RenderCopy(renderer, textTexture, NULL, &dstRect);
+                SDL_RenderCopy(renderer, textTexture, nullptr, &dstRect);
                 SDL_DestroyTexture(textTexture);
                 SDL_FreeSurface(textSurface);
             }
             // Draw trophy PNG below the text
             if (trophyTexture) {
-                int trophyW = 64, trophyH = 64;
+                int trophyW = 64;
+                int trophyH = 64;
                 SDL_Rect trophyRect = {logical_width/2 - trophyW/2, trophyY, trophyW, trophyH};
-                SDL_RenderCopy(renderer, trophyTexture, NULL, &trophyRect);
+                SDL_RenderCopy(renderer, trophyTexture, nullptr, &trophyRect);
             }
             // Draw 'Press ENTER to start a new game' at the bottom
             SDL_Color bottomTextColor = {50, 50, 50, 255}; // dark gray
@@ -539,7 +553,7 @@ int main(int argc, char* argv[]) {
                 int btw = bottomSurface->w;
                 int bth = bottomSurface->h;
                 SDL_Rect bottomRect = {logical_width/2 - btw/2, logical_height - bth - 40, btw, bth};
-                SDL_RenderCopy(renderer, bottomTexture, NULL, &bottomRect);
+                SDL_RenderCopy(renderer, bottomTexture, nullptr, &bottomRect);
                 SDL_DestroyTexture(bottomTexture);
                 SDL_FreeSurface(bottomSurface);
             }
@@ -570,9 +584,9 @@ int main(int argc, char* argv[]) {
 
         // Hintergrund zeichnen
         if (boss_fight && bossBackgroundTexture) {
-            SDL_RenderCopy(renderer, bossBackgroundTexture, NULL, NULL);
+            SDL_RenderCopy(renderer, bossBackgroundTexture, nullptr, nullptr);
         } else if (backgroundTexture) {
-            SDL_RenderCopy(renderer, backgroundTexture, NULL, NULL);
+            SDL_RenderCopy(renderer, backgroundTexture, nullptr, nullptr);
         } else {
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
             SDL_RenderClear(renderer);
@@ -580,9 +594,10 @@ int main(int argc, char* argv[]) {
 
         // Gorilla zeichnen
         if (gorillaTexture) {
-            int gorillaW = 64, gorillaH = 64;
+            int gorillaW = 64;
+            int gorillaH = 64;
             SDL_Rect gorillaRect = {static_cast<int>(triangle_x) - gorillaW/2, logical_height - gorillaH - 10, gorillaW, gorillaH};
-            SDL_RenderCopy(renderer, gorillaTexture, NULL, &gorillaRect);
+            SDL_RenderCopy(renderer, gorillaTexture, nullptr, &gorillaRect);
         }
 
         if (state[SDL_SCANCODE_A]) {
@@ -618,7 +633,8 @@ int main(int argc, char* argv[]) {
                 // Rechteck für Alien
                 SDL_Rect alien_rect = { static_cast<int>(alien_it->x), static_cast<int>(alien_it->y), alien_size, alien_size };
                 // Rechteck für Fass-Projektil
-                int barrelW = 32, barrelH = 48;
+                int barrelW = 32;
+                int barrelH = 48;
                 SDL_Rect proj_rect = { static_cast<int>(proj_it->x) - barrelW/2, static_cast<int>(proj_it->y) - barrelH, barrelW, barrelH };
                 // SDL_HasIntersection prüft auf Überlappung
                 if (SDL_HasIntersection(&alien_rect, &proj_rect)) {
@@ -639,7 +655,8 @@ int main(int argc, char* argv[]) {
         if (boss.active) {
             for (auto proj_it = projectiles.begin(); proj_it != projectiles.end(); ) {
                 SDL_Rect boss_rect = { static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, boss_size };
-                int barrelW = 32, barrelH = 48;
+                int barrelW = 32;
+                int barrelH = 48;
                 SDL_Rect proj_rect = { static_cast<int>(proj_it->x) - barrelW/2, static_cast<int>(proj_it->y) - barrelH, barrelW, barrelH };
                 if (SDL_HasIntersection(&boss_rect, &proj_rect)) {
                     boss.hp--;
@@ -832,7 +849,7 @@ int main(int argc, char* argv[]) {
             if (barrelTexture) {
                 int barrelW = 32, barrelH = 48;
                 SDL_Rect barrelRect = { static_cast<int>(proj.x) - barrelW/2, static_cast<int>(proj.y) - barrelH, barrelW, barrelH };
-                SDL_RenderCopy(renderer, barrelTexture, NULL, &barrelRect);
+                SDL_RenderCopy(renderer, barrelTexture, nullptr, &barrelRect);
             }
         }
         
