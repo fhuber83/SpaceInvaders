@@ -716,7 +716,8 @@ int main(int argc, char* argv[]) {
                 int blink_speed = 8 - (death_timer * 6 / death_duration); // Speed up blinking
                 if (blink_speed < 2) blink_speed = 2;
                 if ((death_timer / blink_speed) % 2 == 0) {
-                    DrawAlien(renderer, static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, ega_palette[15]); // White
+                    //DrawAlien(renderer, static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, ega_palette[15]); // White
+                    DrawAlien(renderer, static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, boss.color);
                 }
             } else {
                 DrawAlien(renderer, static_cast<int>(boss.x - boss_size/2), static_cast<int>(boss.y), boss_size, boss.color);
